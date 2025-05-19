@@ -1,213 +1,166 @@
-const express = require('express');
-const router = express.Router();
-const { Agency, User, Complaint, Category } = require('../models');
-const { sequelize } = require('../models');
-const bcrypt = require('bcrypt');
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { toast } from 'react-toastify';
+import { useAuth } from '../context/AuthContext';
 
-router.get('/', async (req, res) => {
-    try {
-        const agencies = await Agency.findAll({
-            include: [
-                { model: User, as: 'administrator', attributes: ['id', 'firstName', 'lastName'] }
-            ]
-        });
-        res.json(agencies);
-    } catch (error) {
-        console.error('Error fetching agencies:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
+const CreateComplaint = () => {
+    const { currentUser } = useAuth();
+    const navigate = useNavigate();
+    const [agencies, setAgencies] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [formData, setFormData] = useState({
+        title: '',
+        description: '',
+        category: '',
+        location: '',
+        agencyId: ''
+    });
 
-router.get('/:id', async (req, res) => {
-    try {
-        const agency = await Agency.findByPk(req.params.id, {
-            include: [
-                { model: User, as: 'administrator', attributes: ['id', 'firstName', 'lastName'] }
-            ]
-        });
-
-        if (!agency) {
-            return res.status(404).json({ error: 'Agency not found' });
-        }
-
-        res.json(agency);
-    } catch (error) {
-        console.error('Error fetching agency:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Create a new agency
-router.post('/', async (req, res) => {
-    try {
-        const { 
-            name, 
-            description, 
-            address, 
-            phone, 
-            email, 
-            website,
-            // Official user details
-            officialFirstName,
-            officialLastName,
-            officialEmail,
-            officialPassword,
-            officialPhone
-        } = req.body;
-        
-        console.log('Received agency registration data:', {
-            name, description, address, phone, email, website,
-            officialDetails: {
-                firstName: officialFirstName,
-                lastName: officialLastName,
-                email: officialEmail,
-                phone: officialPhone
-                // password omitted for security
+    useEffect(() => {
+        // Fetch agencies for dropdown
+        const fetchAgencies = async () => {
+            try {
+                const response = await axios.get('http://localhost:7000/api/agencies');
+                setAgencies(response.data);
+            } catch (error) {
+                console.error('Error fetching agencies:', error);
+                toast.error('Failed to load agencies');
             }
+        };
+
+        fetchAgencies();
+    }, []);
+
+    const handleChange = (e) => {
+        setFormData({
+            ...formData,
+            [e.target.name]: e.target.value
         });
-        
-        // Validate required fields
-        if (!name || !description || !address || !phone || !email ||
-            !officialFirstName || !officialLastName || !officialEmail || !officialPassword || !officialPhone) {
-            return res.status(400).json({ error: 'All required fields must be provided' });
-        }
-        
-        
-        const result = await sequelize.transaction(async (t) => {
-            const hashedPassword = await bcrypt.hash(officialPassword, 10);
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+
+        try {
+            // Make sure the token is included in the request
+            const token = localStorage.getItem('token');
             
-            const official = await User.create({
-                firstName: officialFirstName,
-                lastName: officialLastName,
-                email: officialEmail,
-                password: hashedPassword,
-                phone: officialPhone,
-                address: address,
-                role: 'official',
-                status: 'active'
-            }, { transaction: t });
+            const response = await axios.post(
+                'http://localhost:7000/api/complaints', 
+                formData,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                }
+            );
+
+            toast.success('Complaint submitted successfully!');
             
-            const agency = await Agency.create({
-                name,
-                description,
-                address,
-                phone,
-                email,
-                website,
-                administratorId: official.id,
-                status: 'active'
-            }, { transaction: t });
+            // Redirect to the complaints list or the new complaint detail
+            setTimeout(() => {
+                navigate('/complaints');
+            }, 2000);
             
-            return { agency, official };
-        });
-        
-        res.status(201).json({ 
-            message: 'Agency and official account created successfully', 
-            agencyId: result.agency.id,
-            officialId: result.official.id
-        });
-    } catch (error) {
-        console.error('Error creating agency and official:', error);
-        if (error.name === 'SequelizeUniqueConstraintError') {
-            return res.status(400).json({ 
-                error: 'A user with this email already exists',
-                details: error.errors.map(e => e.message)
-            });
-        } else if (error.name === 'SequelizeValidationError') {
-            return res.status(400).json({ 
-                error: 'Validation error',
-                details: error.errors.map(e => e.message)
-            });
+        } catch (error) {
+            console.error('Error submitting complaint:', error);
+            toast.error(error.response?.data?.error || 'Failed to submit complaint');
+        } finally {
+            setLoading(false);
         }
-        res.status(400).json({ error: error.message });
-    }
-});
+    };
 
+    return (
+        <div className="max-w-4xl mx-auto p-6">
+            <h1 className="text-3xl font-bold mb-6">Submit a New Complaint</h1>
+            
+            <form onSubmit={handleSubmit} className="space-y-6">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Title</label>
+                    <input
+                        type="text"
+                        name="title"
+                        value={formData.title}
+                        onChange={handleChange}
+                        required
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    />
+                </div>
+                
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Category</label>
+                    <select
+                        name="category"
+                        value={formData.category}
+                        onChange={handleChange}
+                        required
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    >
+                        <option value="">Select a category</option>
+                        <option value="infrastructure">Infrastructure</option>
+                        <option value="public_services">Public Services</option>
+                        <option value="environment">Environment</option>
+                        <option value="safety">Safety & Security</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Agency</label>
+                    <select
+                        name="agencyId"
+                        value={formData.agencyId}
+                        onChange={handleChange}
+                        required
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    >
+                        <option value="">Select an agency</option>
+                        {agencies.map(agency => (
+                            <option key={agency.id} value={agency.id}>
+                                {agency.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Location</label>
+                    <input
+                        type="text"
+                        name="location"
+                        value={formData.location}
+                        onChange={handleChange}
+                        required
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    />
+                </div>
+                
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Description</label>
+                    <textarea
+                        name="description"
+                        value={formData.description}
+                        onChange={handleChange}
+                        required
+                        rows={5}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    ></textarea>
+                </div>
+                
+                <div>
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className={`inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    >
+                        {loading ? 'Submitting...' : 'Submit Complaint'}
+                    </button>
+                </div>
+            </form>
+        </div>
+    );
+};
 
-router.put('/:id', async (req, res) => {
-    try {
-        const { name, description, address, phone, email, website, status } = req.body;
-        const agency = await Agency.findByPk(req.params.id);
-
-        if (!agency) {
-            return res.status(404).json({ error: 'Agency not found' });
-        }
-
-        await agency.update({
-            name,
-            description,
-            address,
-            phone,
-            email,
-            website,
-            status
-        });
-
-        res.json({ message: 'Agency updated successfully' });
-    } catch (error) {
-        console.error('Error updating agency:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-
-router.delete('/:id', async (req, res) => {
-    try {
-        const agency = await Agency.findByPk(req.params.id);
-
-        if (!agency) {
-            return res.status(404).json({ error: 'Agency not found' });
-        }
-
-        await agency.destroy();
-        res.json({ message: 'Agency deleted successfully' });
-    } catch (error) {
-        console.error('Error deleting agency:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-router.get('/:id/complaints', async (req, res) => {
-    try {
-        const agency = await Agency.findByPk(req.params.id);
-        
-        if (!agency) {
-            return res.status(404).json({ error: 'Agency not found' });
-        }
-        
-        const complaints = await Complaint.findAll({
-            where: { assignedToId: req.params.id },
-            include: [
-                { model: User, as: 'submitter', attributes: ['id', 'firstName', 'lastName'] },
-                { model: Category, as: 'category', attributes: ['id', 'name'] }
-            ]
-        });
-
-        res.json(complaints);
-    } catch (error) {
-        console.error('Error fetching agency complaints:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-router.get('/official/:userId', async (req, res) => {
-    try {
-        const agency = await Agency.findOne({
-            where: { administratorId: req.params.userId },
-            include: [
-                { model: User, as: 'administrator', attributes: ['id', 'firstName', 'lastName'] }
-            ]
-        });
-
-        if (!agency) {
-            return res.status(404).json({ error: 'No agency found for this official' });
-        }
-
-        res.json(agency);
-    } catch (error) {
-        console.error('Error fetching agency by official ID:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-module.exports = router;
+export default CreateComplaint;
